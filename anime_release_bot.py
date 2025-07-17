@@ -7,11 +7,25 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters
 import schedule
 import time
 import threading
+from flask import Flask
+from threading import Thread
 
 # Configuration - Use environment variables for deployment
 BOT_TOKEN = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')  # Get from @BotFather
 CHANNEL_ID = os.getenv('CHANNEL_ID', '@your_channel_username')  # Your channel username or chat ID
 ADMIN_USER_ID = int(os.getenv('ADMIN_USER_ID', '123456789'))  # Your user ID for admin commands
+PORT = int(os.getenv('PORT', 5000))  # Render provides PORT environment variable
+
+# Flask app for health check (only needed for web service)
+app = Flask(__name__)
+
+@app.route('/')
+def health_check():
+    return "Anime Release Bot is running!", 200
+
+@app.route('/health')
+def health():
+    return {"status": "healthy", "bot": "running"}, 200
 
 class AnimeReleaseBot:
     def __init__(self, token, channel_id):
@@ -129,32 +143,32 @@ class AnimeReleaseBot:
             await update.message.reply_text("❌ You're not authorized to use this bot.")
             return
         
-        help_text = """🤖 **Anime Release Bot Commands:**
+        help_text = """🤖 Anime Release Bot Commands:
 
-📅 **Schedule Management:**
+📅 Schedule Management:
 /preview - Preview today's post
 /post_now - Send post immediately
 /schedule - View current schedule
 /add_anime - Add new anime (interactive)
 
-⚙️ **Settings:**
+⚙️ Settings:
 /get_chat_id - Get current chat ID
 /set_channel - Set channel ID
 /status - Bot status
 
-📝 **Format for adding anime:**
+📝 Format for adding anime:
 Day: monday/tuesday/wednesday/thursday/friday/saturday/sunday
 Name: Anime Name
 Time: Release time
 Episode: Episode info
 Platform: Platform info
 
-💡 **For Private Channels:**
+💡 For Private Channels:
 1. Add bot to your private channel as admin
 2. Use /get_chat_id in the channel to get channel ID
 3. Use that ID in your configuration
 """
-        await update.message.reply_text(help_text, parse_mode='Markdown')
+        await update.message.reply_text(help_text)
     
     async def get_chat_id_command(self, update, context):
         """Get current chat ID - useful for private channels"""
@@ -162,17 +176,17 @@ Platform: Platform info
         chat_type = update.effective_chat.type
         chat_title = update.effective_chat.title or "N/A"
         
-        info_text = f"""📍 **Chat Information:**
+        info_text = f"""📍 Chat Information:
         
-**Chat ID:** `{chat_id}`
-**Chat Type:** {chat_type}
-**Chat Title:** {chat_title}
+Chat ID: {chat_id}
+Chat Type: {chat_type}
+Chat Title: {chat_title}
 
-💡 **Usage:**
+💡 Usage:
 - For private channels, use this Chat ID in your configuration
 - Copy the Chat ID exactly as shown (including the minus sign)
 """
-        await update.message.reply_text(info_text, parse_mode='Markdown')
+        await update.message.reply_text(info_text)
     
     async def preview_command(self, update, context):
         """Preview today's post"""
@@ -180,7 +194,7 @@ Platform: Platform info
             return
         
         message = self.format_post()
-        await update.message.reply_text(f"📋 **Post Preview:**\n\n{message}", parse_mode='Markdown')
+        await update.message.reply_text(f"📋 Post Preview:\n\n{message}")
     
     async def post_now_command(self, update, context):
         """Send post immediately"""
@@ -195,10 +209,10 @@ Platform: Platform info
         if update.effective_user.id != ADMIN_USER_ID:
             return
         
-        schedule_text = "📅 **Current Anime Schedule:**\n\n"
+        schedule_text = "📅 Current Anime Schedule:\n\n"
         
         for day, anime_list in self.anime_schedule.items():
-            schedule_text += f"**{day.upper()}:**\n"
+            schedule_text += f"{day.upper()}:\n"
             if anime_list:
                 for anime in anime_list:
                     schedule_text += f"• {anime['name']} - {anime['time']} - {anime['episode']}\n"
@@ -206,7 +220,7 @@ Platform: Platform info
                 schedule_text += "• No anime scheduled\n"
             schedule_text += "\n"
         
-        await update.message.reply_text(schedule_text, parse_mode='Markdown')
+        await update.message.reply_text(schedule_text)
     
     async def add_anime_command(self, update, context):
         """Add new anime to schedule"""
@@ -214,16 +228,13 @@ Platform: Platform info
             return
         
         await update.message.reply_text(
-            "📝 **Add New Anime**\n\n"
-            "Please send the anime details in this format:\n"
-            "```\n"
+            "📝 Add New Anime\n\n"
+            "Please send the anime details in this format:\n\n"
             "Day: friday\n"
             "Name: Anime Name\n"
             "Time: 8:30 PM\n"
             "Episode: S01 E01\n"
-            "Platform: 🎬 YouTube [Channel Name]\n"
-            "```",
-            parse_mode='Markdown'
+            "Platform: 🎬 YouTube [Channel Name]"
         )
     
     async def handle_message(self, update, context):
@@ -277,16 +288,16 @@ Platform: Platform info
     
     def run(self):
         """Run the bot"""
-        app = Application.builder().token(self.token).build()
+        telegram_app = Application.builder().token(self.token).build()
         
         # Add handlers
-        app.add_handler(CommandHandler("start", self.start_command))
-        app.add_handler(CommandHandler("preview", self.preview_command))
-        app.add_handler(CommandHandler("post_now", self.post_now_command))
-        app.add_handler(CommandHandler("schedule", self.schedule_command))
-        app.add_handler(CommandHandler("add_anime", self.add_anime_command))
-        app.add_handler(CommandHandler("get_chat_id", self.get_chat_id_command))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+        telegram_app.add_handler(CommandHandler("start", self.start_command))
+        telegram_app.add_handler(CommandHandler("preview", self.preview_command))
+        telegram_app.add_handler(CommandHandler("post_now", self.post_now_command))
+        telegram_app.add_handler(CommandHandler("schedule", self.schedule_command))
+        telegram_app.add_handler(CommandHandler("add_anime", self.add_anime_command))
+        telegram_app.add_handler(CommandHandler("get_chat_id", self.get_chat_id_command))
+        telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
         
         # Setup scheduler
         self.setup_scheduler()
@@ -294,8 +305,24 @@ Platform: Platform info
         print("🤖 Anime Release Bot is running...")
         print("📅 Daily posts scheduled for 9:00 AM")
         
-        # Run the bot
-        app.run_polling()
+        # Run bot in a separate thread
+        def run_bot():
+            telegram_app.run_polling()
+        
+        bot_thread = Thread(target=run_bot, daemon=True)
+        bot_thread.start()
+        
+        # Run Flask app for health check (if deployed as web service)
+        if os.getenv('RENDER'):
+            print(f"🌐 Health check server running on port {PORT}")
+            app.run(host='0.0.0.0', port=PORT)
+        else:
+            # For local development, just run the bot
+            bot_thread.join()
+
+def run_flask_app():
+    """Run Flask app for health check"""
+    app.run(host='0.0.0.0', port=PORT)
 
 # Main execution
 if __name__ == "__main__":
