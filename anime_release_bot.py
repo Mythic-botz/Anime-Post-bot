@@ -9,22 +9,14 @@ import time
 import threading
 from flask import Flask
 from threading import Thread
-import logging
-
-# Enable logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
 
 # Configuration - Use environment variables for deployment
-BOT_TOKEN = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
-CHANNEL_ID = os.getenv('CHANNEL_ID', '@your_channel_username')
-ADMIN_USER_ID = int(os.getenv('ADMIN_USER_ID', '123456789'))
-PORT = int(os.getenv('PORT', 5000))
+BOT_TOKEN = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')  # Get from @BotFather
+CHANNEL_ID = os.getenv('CHANNEL_ID', '@your_channel_username')  # Your channel username or chat ID
+ADMIN_USER_ID = int(os.getenv('ADMIN_USER_ID', '123456789'))  # Your user ID for admin commands
+PORT = int(os.getenv('PORT', 5000))  # Render provides PORT environment variable
 
-# Flask app for health check
+# Flask app for health check (only needed for web service)
 app = Flask(__name__)
 
 @app.route('/')
@@ -41,20 +33,6 @@ class AnimeReleaseBot:
         self.channel_id = channel_id
         self.bot = Bot(token=token)
         self.anime_schedule = {}
-        
-        # Validate configuration
-        if not token or token == 'YOUR_BOT_TOKEN_HERE':
-            logger.error("❌ BOT_TOKEN not configured!")
-            raise ValueError("BOT_TOKEN is required")
-        
-        if not channel_id or channel_id == '@your_channel_username':
-            logger.error("❌ CHANNEL_ID not configured!")
-            raise ValueError("CHANNEL_ID is required")
-        
-        logger.info(f"✅ Bot initialized with token: {token[:10]}...")
-        logger.info(f"✅ Channel ID: {channel_id}")
-        logger.info(f"✅ Admin User ID: {ADMIN_USER_ID}")
-        
         self.load_schedule()
         
     def load_schedule(self):
@@ -161,73 +139,62 @@ class AnimeReleaseBot:
     
     async def start_command(self, update, context):
         """Handle /start command"""
-        logger.info(f"Start command received from user: {update.effective_user.id}")
-        logger.info(f"Admin User ID: {ADMIN_USER_ID}")
+        if update.effective_user.id != ADMIN_USER_ID:
+            await update.message.reply_text("❌ You're not authorized to use this bot.")
+            return
         
-        # Remove admin restriction for testing
-        # if update.effective_user.id != ADMIN_USER_ID:
-        #     await update.message.reply_text("❌ You're not authorized to use this bot.")
-        #     return
-        
-        help_text = """🤖 Anime Release Bot Commands:
+        help_text = """🤖 **Anime Release Bot Commands:**
 
-📅 Schedule Management:
+📅 **Schedule Management:**
 /preview - Preview today's post
 /post_now - Send post immediately
 /schedule - View current schedule
 /add_anime - Add new anime (interactive)
 
-⚙️ Settings:
+⚙️ **Settings:**
 /get_chat_id - Get current chat ID
+/set_channel - Set channel ID
 /status - Bot status
 
-📝 Format for adding anime:
-Day: friday
+📝 **Format for adding anime:**
+Day: monday/tuesday/wednesday/thursday/friday/saturday/sunday
 Name: Anime Name
-Time: 8:30 PM
-Episode: S01 E01
-Platform: 🎬 YouTube [Channel Name]
+Time: Release time
+Episode: Episode info
+Platform: Platform info
 
-💡 For Private Channels:
+💡 **For Private Channels:**
 1. Add bot to your private channel as admin
 2. Use /get_chat_id in the channel to get channel ID
-3. Use that ID in your configuration
-
-🔧 Your User ID: """ + str(update.effective_user.id) + """
-🔧 Bot configured for Admin ID: """ + str(ADMIN_USER_ID)
+3. Use that ID in your configuration"""
         
-        await update.message.reply_text(help_text)
+        await update.message.reply_text(help_text, parse_mode='Markdown')
     
     async def get_chat_id_command(self, update, context):
         """Get current chat ID - useful for private channels"""
-        logger.info(f"Get chat ID command received from user: {update.effective_user.id}")
-        
         chat_id = update.effective_chat.id
         chat_type = update.effective_chat.type
         chat_title = update.effective_chat.title or "N/A"
         
-        info_text = f"""📍 Chat Information:
+        info_text = f"""📍 **Chat Information:**
         
-Chat ID: {chat_id}
-Chat Type: {chat_type}
-Chat Title: {chat_title}
+**Chat ID:** `{chat_id}`
+**Chat Type:** {chat_type}
+**Chat Title:** {chat_title}
 
-💡 Usage:
+💡 **Usage:**
 - For private channels, use this Chat ID in your configuration
-- Copy the Chat ID exactly as shown (including the minus sign)
-"""
-        await update.message.reply_text(info_text)
+- Copy the Chat ID exactly as shown (including the minus sign)"""
+        
+        await update.message.reply_text(info_text, parse_mode='Markdown')
     
     async def preview_command(self, update, context):
         """Preview today's post"""
-        logger.info(f"Preview command received from user: {update.effective_user.id}")
+        if update.effective_user.id != ADMIN_USER_ID:
+            return
         
-        try:
-            message = self.format_post()
-            await update.message.reply_text(f"📋 Post Preview:\n\n{message}")
-        except Exception as e:
-            logger.error(f"Error in preview command: {e}")
-            await update.message.reply_text(f"❌ Error generating preview: {str(e)}")
+        message = self.format_post()
+        await update.message.reply_text(f"📋 **Post Preview:**\n\n{message}", parse_mode='Markdown')
     
     async def post_now_command(self, update, context):
         """Send post immediately"""
@@ -242,10 +209,10 @@ Chat Title: {chat_title}
         if update.effective_user.id != ADMIN_USER_ID:
             return
         
-        schedule_text = "📅 Current Anime Schedule:\n\n"
+        schedule_text = "📅 **Current Anime Schedule:**\n\n"
         
         for day, anime_list in self.anime_schedule.items():
-            schedule_text += f"{day.upper()}:\n"
+            schedule_text += f"**{day.upper()}:**\n"
             if anime_list:
                 for anime in anime_list:
                     schedule_text += f"• {anime['name']} - {anime['time']} - {anime['episode']}\n"
@@ -253,7 +220,7 @@ Chat Title: {chat_title}
                 schedule_text += "• No anime scheduled\n"
             schedule_text += "\n"
         
-        await update.message.reply_text(schedule_text)
+        await update.message.reply_text(schedule_text, parse_mode='Markdown')
     
     async def add_anime_command(self, update, context):
         """Add new anime to schedule"""
@@ -261,13 +228,16 @@ Chat Title: {chat_title}
             return
         
         await update.message.reply_text(
-            "📝 Add New Anime\n\n"
-            "Please send the anime details in this format:\n\n"
+            "📝 **Add New Anime**\n\n"
+            "Please send the anime details in this format:\n"
+            "```\n"
             "Day: friday\n"
             "Name: Anime Name\n"
             "Time: 8:30 PM\n"
             "Episode: S01 E01\n"
-            "Platform: 🎬 YouTube [Channel Name]"
+            "Platform: 🎬 YouTube [Channel Name]\n"
+            "```",
+            parse_mode='Markdown'
         )
     
     async def handle_message(self, update, context):
@@ -321,61 +291,40 @@ Chat Title: {chat_title}
     
     def run(self):
         """Run the bot"""
-        try:
-            telegram_app = Application.builder().token(self.token).build()
+        telegram_app = Application.builder().token(self.token).build()
+        
+        # Add handlers
+        telegram_app.add_handler(CommandHandler("start", self.start_command))
+        telegram_app.add_handler(CommandHandler("preview", self.preview_command))
+        telegram_app.add_handler(CommandHandler("post_now", self.post_now_command))
+        telegram_app.add_handler(CommandHandler("schedule", self.schedule_command))
+        telegram_app.add_handler(CommandHandler("add_anime", self.add_anime_command))
+        telegram_app.add_handler(CommandHandler("get_chat_id", self.get_chat_id_command))
+        telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+        
+        # Setup scheduler
+        self.setup_scheduler()
+        
+        print("🤖 Anime Release Bot is running...")
+        print("📅 Daily posts scheduled for 9:00 AM")
+        
+        # Check if running on Render (or similar hosting service)
+        if os.getenv('RENDER') or os.getenv('RAILWAY_ENVIRONMENT') or os.getenv('HEROKU_APP_NAME'):
+            print(f"🌐 Running in production mode on port {PORT}")
             
-            # Add handlers
-            telegram_app.add_handler(CommandHandler("start", self.start_command))
-            telegram_app.add_handler(CommandHandler("preview", self.preview_command))
-            telegram_app.add_handler(CommandHandler("post_now", self.post_now_command))
-            telegram_app.add_handler(CommandHandler("schedule", self.schedule_command))
-            telegram_app.add_handler(CommandHandler("add_anime", self.add_anime_command))
-            telegram_app.add_handler(CommandHandler("get_chat_id", self.get_chat_id_command))
-            telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+            # Run bot in a separate thread
+            def run_bot():
+                telegram_app.run_polling()
             
-            # Setup scheduler
-            self.setup_scheduler()
+            bot_thread = Thread(target=run_bot, daemon=True)
+            bot_thread.start()
             
-            logger.info("🤖 Anime Release Bot is running...")
-            logger.info("📅 Daily posts scheduled for 9:00 AM")
-            logger.info(f"🔧 Bot Token: {self.token[:10]}...")
-            logger.info(f"🔧 Channel ID: {self.channel_id}")
-            logger.info(f"🔧 Admin User ID: {ADMIN_USER_ID}")
-            
-            # Test bot connection
-            asyncio.run(self.test_bot_connection())
-            
-            # For Render deployment
-            if os.getenv('RENDER'):
-                logger.info("🌐 Running on Render - Starting Flask health check server")
-                # Run bot in a separate thread
-                def run_bot():
-                    telegram_app.run_polling(drop_pending_updates=True)
-                
-                bot_thread = Thread(target=run_bot, daemon=True)
-                bot_thread.start()
-                
-                # Run Flask app for health check
-                logger.info(f"🌐 Health check server running on port {PORT}")
-                app.run(host='0.0.0.0', port=PORT)
-            else:
-                # For local development
-                logger.info("💻 Running locally")
-                telegram_app.run_polling(drop_pending_updates=True)
-                
-        except Exception as e:
-            logger.error(f"❌ Error starting bot: {e}")
-            raise
-    
-    async def test_bot_connection(self):
-        """Test bot connection"""
-        try:
-            me = await self.bot.get_me()
-            logger.info(f"✅ Bot connected successfully: @{me.username}")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Bot connection failed: {e}")
-            return False
+            # Run Flask app for health check
+            app.run(host='0.0.0.0', port=PORT)
+        else:
+            # For local development, just run the bot
+            print("🏠 Running in local development mode")
+            telegram_app.run_polling()
 
 def run_flask_app():
     """Run Flask app for health check"""
@@ -383,26 +332,8 @@ def run_flask_app():
 
 # Main execution
 if __name__ == "__main__":
-    try:
-        logger.info("🚀 Starting Anime Release Bot...")
-        
-        # Validate environment variables
-        if not BOT_TOKEN or BOT_TOKEN == 'YOUR_BOT_TOKEN_HERE':
-            logger.error("❌ BOT_TOKEN environment variable is not set!")
-            logger.error("Please set BOT_TOKEN in your Render environment variables")
-            exit(1)
-            
-        if not CHANNEL_ID or CHANNEL_ID == '@your_channel_username':
-            logger.error("❌ CHANNEL_ID environment variable is not set!")
-            logger.error("Please set CHANNEL_ID in your Render environment variables")
-            exit(1)
-        
-        # Create bot instance
-        bot = AnimeReleaseBot(BOT_TOKEN, CHANNEL_ID)
-        
-        # Run the bot
-        bot.run()
-        
-    except Exception as e:
-        logger.error(f"❌ Failed to start bot: {e}")
-        exit(1)
+    # Create bot instance
+    bot = AnimeReleaseBot(BOT_TOKEN, CHANNEL_ID)
+    
+    # Run the bot
+    bot.run()
