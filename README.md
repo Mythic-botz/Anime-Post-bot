@@ -27,4 +27,4 @@ A Telegram bot that automatically posts daily anime release schedules in Hindi d
 2. Add your bot as admin with post permissions
 3. Note your channel username (e.g., @your_channel)
 
-### 4. Local Development
+# Thank To @VoidXTora
