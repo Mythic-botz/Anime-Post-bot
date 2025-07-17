@@ -138,6 +138,7 @@ class AnimeReleaseBot:
 /add_anime - Add new anime (interactive)
 
 ⚙️ **Settings:**
+/get_chat_id - Get current chat ID
 /set_channel - Set channel ID
 /status - Bot status
 
@@ -147,8 +148,31 @@ Name: Anime Name
 Time: Release time
 Episode: Episode info
 Platform: Platform info
+
+💡 **For Private Channels:**
+1. Add bot to your private channel as admin
+2. Use /get_chat_id in the channel to get channel ID
+3. Use that ID in your configuration
 """
         await update.message.reply_text(help_text, parse_mode='Markdown')
+    
+    async def get_chat_id_command(self, update, context):
+        """Get current chat ID - useful for private channels"""
+        chat_id = update.effective_chat.id
+        chat_type = update.effective_chat.type
+        chat_title = update.effective_chat.title or "N/A"
+        
+        info_text = f"""📍 **Chat Information:**
+        
+**Chat ID:** `{chat_id}`
+**Chat Type:** {chat_type}
+**Chat Title:** {chat_title}
+
+💡 **Usage:**
+- For private channels, use this Chat ID in your configuration
+- Copy the Chat ID exactly as shown (including the minus sign)
+"""
+        await update.message.reply_text(info_text, parse_mode='Markdown')
     
     async def preview_command(self, update, context):
         """Preview today's post"""
@@ -261,6 +285,7 @@ Platform: Platform info
         app.add_handler(CommandHandler("post_now", self.post_now_command))
         app.add_handler(CommandHandler("schedule", self.schedule_command))
         app.add_handler(CommandHandler("add_anime", self.add_anime_command))
+        app.add_handler(CommandHandler("get_chat_id", self.get_chat_id_command))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
         
         # Setup scheduler
