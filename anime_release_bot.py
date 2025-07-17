@@ -1,22 +1,22 @@
-import asyncio
-import json
 import os
-from datetime import datetime, timedelta
-from telegram import Bot
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+import json
+import asyncio
 import schedule
 import time
 import threading
+from datetime import datetime
 from flask import Flask
+from telegram import Bot
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 from threading import Thread
 
-# Configuration - Use environment variables for deployment
-BOT_TOKEN = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')  # Get from @BotFather
-CHANNEL_ID = os.getenv('CHANNEL_ID', '@your_channel_username')  # Your channel username or chat ID
-ADMIN_USER_ID = int(os.getenv('ADMIN_USER_ID', '123456789'))  # Your user ID for admin commands
-PORT = int(os.getenv('PORT', 5000))  # Render provides PORT environment variable
+# === Config ===
+BOT_TOKEN = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
+CHANNEL_ID = os.getenv('CHANNEL_ID', '@your_channel_username')
+ADMIN_USER_ID = int(os.getenv('ADMIN_USER_ID', '123456789'))
+PORT = int(os.getenv('PORT', 5000))
 
-# Flask app for health check (only needed for web service)
+# === Flask App ===
 app = Flask(__name__)
 
 @app.route('/')
@@ -27,83 +27,55 @@ def health_check():
 def health():
     return {"status": "healthy", "bot": "running"}, 200
 
+# === Main Bot Class ===
 class AnimeReleaseBot:
     def __init__(self, token, channel_id):
         self.token = token
         self.channel_id = channel_id
         self.bot = Bot(token=token)
+        self.telegram_app = Application.builder().token(self.token).build()
         self.anime_schedule = {}
         self.load_schedule()
-        
+
     def load_schedule(self):
-        """Load anime schedule from file"""
         try:
             with open('anime_schedule.json', 'r', encoding='utf-8') as f:
                 self.anime_schedule = json.load(f)
         except FileNotFoundError:
-            # Default schedule structure
             self.anime_schedule = {
                 "monday": [],
                 "tuesday": [],
                 "wednesday": [],
                 "thursday": [],
-                "friday": [
-                    {
-                        "name": "Yaiba : Samurai Legend",
-                        "time": "~~~",
-                        "episode": "S01 E08",
-                        "platform": "📱 Amazon prime video [Anime Times]"
-                    },
-                    {
-                        "name": "Fairy Tail",
-                        "time": "8:30 PM",
-                        "episode": "S03 E01",
-                        "platform": "🎬 YouTube [Muse India]"
-                    }
-                ],
+                "friday": [],
                 "saturday": [],
                 "sunday": []
             }
             self.save_schedule()
-    
+
     def save_schedule(self):
-        """Save anime schedule to file"""
         with open('anime_schedule.json', 'w', encoding='utf-8') as f:
             json.dump(self.anime_schedule, f, indent=2, ensure_ascii=False)
-    
+
     def get_day_name(self, date_obj):
-        """Get formatted day name"""
-        days = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"]
-        return days[date_obj.weekday()]
-    
+        return ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"][date_obj.weekday()]
+
     def get_month_name(self, date_obj):
-        """Get formatted month name"""
-        months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                 "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-        return months[date_obj.month - 1]
-    
+        return ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][date_obj.month - 1]
+
     def format_post(self, date_obj=None):
-        """Format the anime release post"""
         if date_obj is None:
             date_obj = datetime.now()
-        
         day_name = self.get_day_name(date_obj)
-        day_num = date_obj.day
-        month_name = self.get_month_name(date_obj)
-        
-        # Get today's anime schedule
         day_key = day_name.lower()
         today_anime = self.anime_schedule.get(day_key, [])
-        
-        # Header
+
         post = f"""⟣━━━━━━━━━━━━━━━━━━━⟢  
-      📅 {day_name} • {day_num} {month_name}  
+      📅 {day_name} • {date_obj.day} {self.get_month_name(date_obj)}  
   『 Anime Release Guide | Hindi Dub 』  
 ⟣━━━━━━━━━━━━━━━━━━━⟢  
 
 """
-        
-        # Add anime entries
         if today_anime:
             for anime in today_anime:
                 post += f"""⫷ {anime['name']} ⫸  
@@ -115,8 +87,7 @@ class AnimeReleaseBot:
 """
         else:
             post += "🎌 No anime releases scheduled for today\n\n"
-        
-        # Footer
+
         post += """📌 Daily Hindi Dub Updates Only On:  
 🔗 
 
@@ -125,215 +96,118 @@ class AnimeReleaseBot:
 #DrStone #DanDaDan #FairyTail #MuseIndia #CrunchyrollHindi  
 
 ━━━━━━━━━━━━━━━━━━━"""
-        
+
         return post
-    
+
     async def send_daily_post(self):
-        """Send daily anime release post"""
         try:
             message = self.format_post()
             await self.bot.send_message(chat_id=self.channel_id, text=message)
-            print(f"Daily post sent successfully at {datetime.now()}")
+            print(f"✅ Daily post sent at {datetime.now()}")
         except Exception as e:
-            print(f"Error sending daily post: {e}")
-    
+            print(f"❌ Error sending post: {e}")
+
+    # === Bot Commands ===
     async def start_command(self, update, context):
-        """Handle /start command"""
         if update.effective_user.id != ADMIN_USER_ID:
-            await update.message.reply_text("❌ You're not authorized to use this bot.")
-            return
-        
-        help_text = """🤖 **Anime Release Bot Commands:**
+            return await update.message.reply_text("❌ You're not authorized to use this bot.")
+        await update.message.reply_text("🤖 Anime Release Bot is running! Use /preview or /post_now.")
 
-📅 **Schedule Management:**
-/preview - Preview today's post
-/post_now - Send post immediately
-/schedule - View current schedule
-/add_anime - Add new anime (interactive)
-
-⚙️ **Settings:**
-/get_chat_id - Get current chat ID
-/set_channel - Set channel ID
-/status - Bot status
-
-📝 **Format for adding anime:**
-Day: monday/tuesday/wednesday/thursday/friday/saturday/sunday
-Name: Anime Name
-Time: Release time
-Episode: Episode info
-Platform: Platform info
-
-💡 **For Private Channels:**
-1. Add bot to your private channel as admin
-2. Use /get_chat_id in the channel to get channel ID
-3. Use that ID in your configuration"""
-        
-        await update.message.reply_text(help_text, parse_mode='Markdown')
-    
     async def get_chat_id_command(self, update, context):
-        """Get current chat ID - useful for private channels"""
         chat_id = update.effective_chat.id
         chat_type = update.effective_chat.type
-        chat_title = update.effective_chat.title or "N/A"
-        
-        info_text = f"""📍 **Chat Information:**
-        
-**Chat ID:** `{chat_id}`
-**Chat Type:** {chat_type}
-**Chat Title:** {chat_title}
-
-💡 **Usage:**
-- For private channels, use this Chat ID in your configuration
-- Copy the Chat ID exactly as shown (including the minus sign)"""
-        
-        await update.message.reply_text(info_text, parse_mode='Markdown')
-    
-    async def preview_command(self, update, context):
-        """Preview today's post"""
-        if update.effective_user.id != ADMIN_USER_ID:
-            return
-        
-        message = self.format_post()
-        await update.message.reply_text(f"📋 **Post Preview:**\n\n{message}", parse_mode='Markdown')
-    
-    async def post_now_command(self, update, context):
-        """Send post immediately"""
-        if update.effective_user.id != ADMIN_USER_ID:
-            return
-        
-        await self.send_daily_post()
-        await update.message.reply_text("✅ Post sent successfully!")
-    
-    async def schedule_command(self, update, context):
-        """View current schedule"""
-        if update.effective_user.id != ADMIN_USER_ID:
-            return
-        
-        schedule_text = "📅 **Current Anime Schedule:**\n\n"
-        
-        for day, anime_list in self.anime_schedule.items():
-            schedule_text += f"**{day.upper()}:**\n"
-            if anime_list:
-                for anime in anime_list:
-                    schedule_text += f"• {anime['name']} - {anime['time']} - {anime['episode']}\n"
-            else:
-                schedule_text += "• No anime scheduled\n"
-            schedule_text += "\n"
-        
-        await update.message.reply_text(schedule_text, parse_mode='Markdown')
-    
-    async def add_anime_command(self, update, context):
-        """Add new anime to schedule"""
-        if update.effective_user.id != ADMIN_USER_ID:
-            return
-        
+        title = update.effective_chat.title or "N/A"
         await update.message.reply_text(
-            "📝 **Add New Anime**\n\n"
-            "Please send the anime details in this format:\n"
-            "```\n"
-            "Day: friday\n"
-            "Name: Anime Name\n"
-            "Time: 8:30 PM\n"
-            "Episode: S01 E01\n"
-            "Platform: 🎬 YouTube [Channel Name]\n"
-            "```",
+            f"📍 **Chat Info:**\n\n"
+            f"**ID:** `{chat_id}`\n**Type:** {chat_type}\n**Title:** {title}",
             parse_mode='Markdown'
         )
-    
-    async def handle_message(self, update, context):
-        """Handle text messages for adding anime"""
+
+    async def preview_command(self, update, context):
         if update.effective_user.id != ADMIN_USER_ID:
             return
-        
+        message = self.format_post()
+        await update.message.reply_text(f"📋 **Post Preview:**\n\n{message}", parse_mode='Markdown')
+
+    async def post_now_command(self, update, context):
+        if update.effective_user.id != ADMIN_USER_ID:
+            return
+        await self.send_daily_post()
+        await update.message.reply_text("✅ Post sent!")
+
+    async def schedule_command(self, update, context):
+        if update.effective_user.id != ADMIN_USER_ID:
+            return
+        msg = "📅 **Schedule:**\n\n"
+        for day, animes in self.anime_schedule.items():
+            msg += f"**{day.upper()}**\n"
+            msg += "\n".join([f"• {a['name']} - {a['time']} - {a['episode']}" for a in animes]) or "• No anime\n"
+            msg += "\n\n"
+        await update.message.reply_text(msg, parse_mode='Markdown')
+
+    async def handle_message(self, update, context):
+        if update.effective_user.id != ADMIN_USER_ID:
+            return
         text = update.message.text
-        
-        # Check if message contains anime data
         if "Day:" in text and "Name:" in text:
             try:
                 lines = text.strip().split('\n')
-                anime_data = {}
-                
+                anime = {}
                 for line in lines:
                     if line.startswith("Day:"):
                         day = line.split("Day:")[1].strip().lower()
                     elif line.startswith("Name:"):
-                        anime_data['name'] = line.split("Name:")[1].strip()
+                        anime['name'] = line.split("Name:")[1].strip()
                     elif line.startswith("Time:"):
-                        anime_data['time'] = line.split("Time:")[1].strip()
+                        anime['time'] = line.split("Time:")[1].strip()
                     elif line.startswith("Episode:"):
-                        anime_data['episode'] = line.split("Episode:")[1].strip()
+                        anime['episode'] = line.split("Episode:")[1].strip()
                     elif line.startswith("Platform:"):
-                        anime_data['platform'] = line.split("Platform:")[1].strip()
-                
-                # Add to schedule
-                if day in self.anime_schedule and all(key in anime_data for key in ['name', 'time', 'episode', 'platform']):
-                    self.anime_schedule[day].append(anime_data)
+                        anime['platform'] = line.split("Platform:")[1].strip()
+                if day in self.anime_schedule and all(k in anime for k in ['name', 'time', 'episode', 'platform']):
+                    self.anime_schedule[day].append(anime)
                     self.save_schedule()
-                    await update.message.reply_text(f"✅ Added '{anime_data['name']}' to {day.upper()} schedule!")
+                    await update.message.reply_text(f"✅ Added '{anime['name']}' to {day.upper()}")
                 else:
-                    await update.message.reply_text("❌ Invalid format. Please check your input.")
-                    
+                    await update.message.reply_text("❌ Invalid format.")
             except Exception as e:
-                await update.message.reply_text(f"❌ Error adding anime: {e}")
-    
+                await update.message.reply_text(f"❌ Error: {e}")
+
     def setup_scheduler(self):
-        """Setup automatic posting schedule"""
-        # Schedule daily post at 9:00 AM
         schedule.every().day.at("09:00").do(lambda: asyncio.run(self.send_daily_post()))
-        
-        def run_scheduler():
-            while True:
-                schedule.run_pending()
-                time.sleep(60)
-        
-        scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
-        scheduler_thread.start()
-    
+        Thread(target=self.run_scheduler_loop, daemon=True).start()
+
+    def run_scheduler_loop(self):
+        while True:
+            schedule.run_pending()
+            time.sleep(60)
+
     def run(self):
-        """Run the bot"""
-        telegram_app = Application.builder().token(self.token).build()
-        
-        # Add handlers
-        telegram_app.add_handler(CommandHandler("start", self.start_command))
-        telegram_app.add_handler(CommandHandler("preview", self.preview_command))
-        telegram_app.add_handler(CommandHandler("post_now", self.post_now_command))
-        telegram_app.add_handler(CommandHandler("schedule", self.schedule_command))
-        telegram_app.add_handler(CommandHandler("add_anime", self.add_anime_command))
-        telegram_app.add_handler(CommandHandler("get_chat_id", self.get_chat_id_command))
-        telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
-        
-        # Setup scheduler
+        # Add Telegram handlers
+        self.telegram_app.add_handler(CommandHandler("start", self.start_command))
+        self.telegram_app.add_handler(CommandHandler("preview", self.preview_command))
+        self.telegram_app.add_handler(CommandHandler("post_now", self.post_now_command))
+        self.telegram_app.add_handler(CommandHandler("schedule", self.schedule_command))
+        self.telegram_app.add_handler(CommandHandler("get_chat_id", self.get_chat_id_command))
+        self.telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+
+        # Start scheduler
         self.setup_scheduler()
-        
+
         print("🤖 Anime Release Bot is running...")
         print("📅 Daily posts scheduled for 9:00 AM")
-        
-        # Check if running on Render (or similar hosting service)
+
         if os.getenv('RENDER') or os.getenv('RAILWAY_ENVIRONMENT') or os.getenv('HEROKU_APP_NAME'):
-            print(f"🌐 Running in production mode on port {PORT}")
-            
-            # Run bot in a separate thread
+            print(f"🌐 Production mode on port {PORT}")
             def run_bot():
-                telegram_app.run_polling()
-            
-            bot_thread = Thread(target=run_bot, daemon=True)
-            bot_thread.start()
-            
-            # Run Flask app for health check
+                asyncio.run(self.telegram_app.run_polling())
+            Thread(target=run_bot, daemon=True).start()
             app.run(host='0.0.0.0', port=PORT)
         else:
-            # For local development, just run the bot
-            print("🏠 Running in local development mode")
-            telegram_app.run_polling()
+            print("🏠 Development mode")
+            self.telegram_app.run_polling()
 
-def run_flask_app():
-    """Run Flask app for health check"""
-    app.run(host='0.0.0.0', port=PORT)
-
-# Main execution
+# === Main Entry Point ===
 if __name__ == "__main__":
-    # Create bot instance
     bot = AnimeReleaseBot(BOT_TOKEN, CHANNEL_ID)
-    
-    # Run the bot
     bot.run()
