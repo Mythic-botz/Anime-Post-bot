@@ -1,213 +1,184 @@
 import os
 import json
 import asyncio
-import schedule
-import time
 import threading
 from datetime import datetime
-from flask import Flask
-from telegram import Bot
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
-from threading import Thread
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
-# === Config ===
-BOT_TOKEN = os.getenv('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
-CHANNEL_ID = os.getenv('CHANNEL_ID', '@your_channel_username')
-ADMIN_USER_ID = int(os.getenv('ADMIN_USER_ID', '123456789'))
-PORT = int(os.getenv('PORT', 5000))
+from telegram import Bot, Update
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler, filters, ContextTypes
+)
 
-# === Flask App ===
-app = Flask(__name__)
+# 🌐 Environment Variables
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL_ID = os.getenv("CHANNEL_ID")  # Example: '@yourchannel'
+ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "123456789"))
+SCHEDULE_FILE = "anime_schedule.json"
 
-@app.route('/')
-def health_check():
-    return "Anime Release Bot is running!", 200
+# 📁 Load or create schedule
+def load_schedule():
+    if not os.path.exists(SCHEDULE_FILE):
+        with open(SCHEDULE_FILE, "w", encoding="utf-8") as f:
+            json.dump({
+                "monday": [], "tuesday": [], "wednesday": [],
+                "thursday": [], "friday": [], "saturday": [], "sunday": []
+            }, f, indent=2, ensure_ascii=False)
+    with open(SCHEDULE_FILE, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-@app.route('/health')
-def health():
-    return {"status": "healthy", "bot": "running"}, 200
+def save_schedule(data):
+    with open(SCHEDULE_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
-# === Main Bot Class ===
-class AnimeReleaseBot:
-    def __init__(self, token, channel_id):
-        self.token = token
-        self.channel_id = channel_id
-        self.bot = Bot(token=token)
-        self.telegram_app = Application.builder().token(self.token).build()
-        self.anime_schedule = {}
-        self.load_schedule()
+# 🧠 Format daily post
+def format_post():
+    schedule = load_schedule()
+    now = datetime.now()
+    day = now.strftime("%A").lower()
+    day_human = now.strftime("%A")
+    day_num = now.day
+    month = now.strftime("%b")
 
-    def load_schedule(self):
-        try:
-            with open('anime_schedule.json', 'r', encoding='utf-8') as f:
-                self.anime_schedule = json.load(f)
-        except FileNotFoundError:
-            self.anime_schedule = {
-                "monday": [],
-                "tuesday": [],
-                "wednesday": [],
-                "thursday": [],
-                "friday": [],
-                "saturday": [],
-                "sunday": []
-            }
-            self.save_schedule()
-
-    def save_schedule(self):
-        with open('anime_schedule.json', 'w', encoding='utf-8') as f:
-            json.dump(self.anime_schedule, f, indent=2, ensure_ascii=False)
-
-    def get_day_name(self, date_obj):
-        return ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"][date_obj.weekday()]
-
-    def get_month_name(self, date_obj):
-        return ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][date_obj.month - 1]
-
-    def format_post(self, date_obj=None):
-        if date_obj is None:
-            date_obj = datetime.now()
-        day_name = self.get_day_name(date_obj)
-        day_key = day_name.lower()
-        today_anime = self.anime_schedule.get(day_key, [])
-
-        post = f"""⟣━━━━━━━━━━━━━━━━━━━⟢  
-      📅 {day_name} • {date_obj.day} {self.get_month_name(date_obj)}  
-  『 Anime Release Guide | Hindi Dub 』  
-⟣━━━━━━━━━━━━━━━━━━━⟢  
+    anime_list = schedule.get(day, [])
+    msg = f"""⟣━━━━━━━━━━━━━━━━━━━⟢
+📅 {day_human} • {day_num} {month}
+『 Anime Release Guide | Hindi Dub 』
+⟣━━━━━━━━━━━━━━━━━━━⟢
 
 """
-        if today_anime:
-            for anime in today_anime:
-                post += f"""⫷ {anime['name']} ⫸  
-┃🕒 Time: {anime['time']}  
-┃🎬 Episode: {anime['episode']}  
+    if anime_list:
+        for anime in anime_list:
+            msg += f"""⫷ {anime['name']} ⫸
+┃🕒 Time: {anime['time']}
+┃🎬 Episode: {anime['episode']}
 ┃📺 Platform: {anime['platform']}
 ┗━━━━━━━━━━━━━━━
 
 """
-        else:
-            post += "🎌 No anime releases scheduled for today\n\n"
+    else:
+        msg += "🎌 No anime releases scheduled for today\n\n"
 
-        post += """📌 Daily Hindi Dub Updates Only On:  
-🔗 
+    msg += """📌 Daily Hindi Dub Updates Only On:
+🔗 t.me/YOUR_CHANNEL
 
-━━━━━━━━━━━━━━━━━━━  
-#HindiDubbedAnime  #AnimeInHindi  
-#DrStone #DanDaDan #FairyTail #MuseIndia #CrunchyrollHindi  
-
+━━━━━━━━━━━━━━━━━━━
+#HindiDubbedAnime  #AnimeInHindi
+#DrStone #FairyTail #CrunchyrollHindi
 ━━━━━━━━━━━━━━━━━━━"""
+    return msg
 
-        return post
+# 🚀 Bot command handlers
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_USER_ID:
+        return await update.message.reply_text("❌ You are not authorized.")
+    await update.message.reply_text("🤖 Welcome to Anime Release Bot!")
 
-    async def send_daily_post(self):
+async def preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_USER_ID:
+        return
+    await update.message.reply_text(format_post())
+
+async def post_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_USER_ID:
+        return
+    try:
+        await context.bot.send_message(chat_id=CHANNEL_ID, text=format_post())
+        await update.message.reply_text("✅ Post sent to channel!")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+async def schedule_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_USER_ID:
+        return
+    schedule = load_schedule()
+    text = "📅 **Current Anime Schedule:**\n\n"
+    for day, items in schedule.items():
+        text += f"**{day.upper()}**\n"
+        if not items:
+            text += "• No anime scheduled\n"
+        for anime in items:
+            text += f"• {anime['name']} at {anime['time']} - {anime['episode']}\n"
+        text += "\n"
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+async def add_anime(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_USER_ID:
+        return
+    await update.message.reply_text(
+        "📝 Send details like this:\n\n"
+        "`Day: friday\n"
+        "Name: Fairy Tail\n"
+        "Time: 8:30 PM\n"
+        "Episode: S03 E01\n"
+        "Platform: 🎬 YouTube [Muse India]`",
+        parse_mode="Markdown"
+    )
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_USER_ID:
+        return
+    msg = update.message.text
+    if all(x in msg for x in ["Day:", "Name:", "Time:", "Episode:", "Platform:"]):
         try:
-            message = self.format_post()
-            await self.bot.send_message(chat_id=self.channel_id, text=message)
-            print(f"✅ Daily post sent at {datetime.now()}")
+            lines = msg.strip().splitlines()
+            anime = {}
+            for line in lines:
+                key, val = line.split(":", 1)
+                anime[key.strip().lower()] = val.strip()
+            day = anime.pop("day").lower()
+            data = load_schedule()
+            if day not in data:
+                return await update.message.reply_text("❌ Invalid day.")
+            data[day].append(anime)
+            save_schedule(data)
+            await update.message.reply_text(f"✅ Added '{anime['name']}' to {day.title()}")
         except Exception as e:
-            print(f"❌ Error sending post: {e}")
+            await update.message.reply_text(f"❌ Failed to add: {e}")
 
-    # === Bot Commands ===
-    async def start_command(self, update, context):
-        if update.effective_user.id != ADMIN_USER_ID:
-            return await update.message.reply_text("❌ You're not authorized to use this bot.")
-        await update.message.reply_text("🤖 Anime Release Bot is running! Use /preview or /post_now.")
-
-    async def get_chat_id_command(self, update, context):
-        chat_id = update.effective_chat.id
-        chat_type = update.effective_chat.type
-        title = update.effective_chat.title or "N/A"
-        await update.message.reply_text(
-            f"📍 **Chat Info:**\n\n"
-            f"**ID:** `{chat_id}`\n**Type:** {chat_type}\n**Title:** {title}",
-            parse_mode='Markdown'
-        )
-
-    async def preview_command(self, update, context):
-        if update.effective_user.id != ADMIN_USER_ID:
-            return
-        message = self.format_post()
-        await update.message.reply_text(f"📋 **Post Preview:**\n\n{message}", parse_mode='Markdown')
-
-    async def post_now_command(self, update, context):
-        if update.effective_user.id != ADMIN_USER_ID:
-            return
-        await self.send_daily_post()
-        await update.message.reply_text("✅ Post sent!")
-
-    async def schedule_command(self, update, context):
-        if update.effective_user.id != ADMIN_USER_ID:
-            return
-        msg = "📅 **Schedule:**\n\n"
-        for day, animes in self.anime_schedule.items():
-            msg += f"**{day.upper()}**\n"
-            msg += "\n".join([f"• {a['name']} - {a['time']} - {a['episode']}" for a in animes]) or "• No anime\n"
-            msg += "\n\n"
-        await update.message.reply_text(msg, parse_mode='Markdown')
-
-    async def handle_message(self, update, context):
-        if update.effective_user.id != ADMIN_USER_ID:
-            return
-        text = update.message.text
-        if "Day:" in text and "Name:" in text:
+# 🔁 Daily auto post
+async def daily_post(app: Application):
+    while True:
+        now = datetime.now()
+        if now.hour == 9 and now.minute == 0:
             try:
-                lines = text.strip().split('\n')
-                anime = {}
-                for line in lines:
-                    if line.startswith("Day:"):
-                        day = line.split("Day:")[1].strip().lower()
-                    elif line.startswith("Name:"):
-                        anime['name'] = line.split("Name:")[1].strip()
-                    elif line.startswith("Time:"):
-                        anime['time'] = line.split("Time:")[1].strip()
-                    elif line.startswith("Episode:"):
-                        anime['episode'] = line.split("Episode:")[1].strip()
-                    elif line.startswith("Platform:"):
-                        anime['platform'] = line.split("Platform:")[1].strip()
-                if day in self.anime_schedule and all(k in anime for k in ['name', 'time', 'episode', 'platform']):
-                    self.anime_schedule[day].append(anime)
-                    self.save_schedule()
-                    await update.message.reply_text(f"✅ Added '{anime['name']}' to {day.upper()}")
-                else:
-                    await update.message.reply_text("❌ Invalid format.")
+                await app.bot.send_message(chat_id=CHANNEL_ID, text=format_post())
+                print("✅ Scheduled post sent")
+                await asyncio.sleep(60)  # Avoid double-send
             except Exception as e:
-                await update.message.reply_text(f"❌ Error: {e}")
+                print(f"❌ Scheduler error: {e}")
+        await asyncio.sleep(30)
 
-    def setup_scheduler(self):
-        schedule.every().day.at("09:00").do(lambda: asyncio.run(self.send_daily_post()))
-        Thread(target=self.run_scheduler_loop, daemon=True).start()
+# 🌐 Dummy HTTP server for Render
+def run_http_server():
+    port = int(os.getenv("PORT", 10000))
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"🤖 Anime Bot is Running (Render Compatible)")
+    server = HTTPServer(("0.0.0.0", port), Handler)
+    print(f"🌐 HTTP server started at http://0.0.0.0:{port}")
+    server.serve_forever()
 
-    def run_scheduler_loop(self):
-        while True:
-            schedule.run_pending()
-            time.sleep(60)
+# 🧠 Main bot setup
+async def main():
+    app = Application.builder().token(BOT_TOKEN).build()
 
-    def run(self):
-        # Add Telegram handlers
-        self.telegram_app.add_handler(CommandHandler("start", self.start_command))
-        self.telegram_app.add_handler(CommandHandler("preview", self.preview_command))
-        self.telegram_app.add_handler(CommandHandler("post_now", self.post_now_command))
-        self.telegram_app.add_handler(CommandHandler("schedule", self.schedule_command))
-        self.telegram_app.add_handler(CommandHandler("get_chat_id", self.get_chat_id_command))
-        self.telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("preview", preview))
+    app.add_handler(CommandHandler("post_now", post_now))
+    app.add_handler(CommandHandler("schedule", schedule_command))
+    app.add_handler(CommandHandler("add_anime", add_anime))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-        # Start scheduler
-        self.setup_scheduler()
+    # 🔁 Start async post scheduler
+    app.job_queue.run_once(lambda _: asyncio.create_task(daily_post(app)), when=1)
 
-        print("🤖 Anime Release Bot is running...")
-        print("📅 Daily posts scheduled for 9:00 AM")
+    print("🤖 Bot started & polling...")
+    await app.run_polling()
 
-        if os.getenv('RENDER') or os.getenv('RAILWAY_ENVIRONMENT') or os.getenv('HEROKU_APP_NAME'):
-            print(f"🌐 Production mode on port {PORT}")
-            def run_bot():
-                asyncio.run(self.telegram_app.run_polling())
-            Thread(target=run_bot, daemon=True).start()
-            app.run(host='0.0.0.0', port=PORT)
-        else:
-            print("🏠 Development mode")
-            self.telegram_app.run_polling()
-
-# === Main Entry Point ===
+# ▶️ Run bot and dummy server together
 if __name__ == "__main__":
-    bot = AnimeReleaseBot(BOT_TOKEN, CHANNEL_ID)
-    bot.run()
+    threading.Thread(target=run_http_server, daemon=True).start()
+    asyncio.run(main())
