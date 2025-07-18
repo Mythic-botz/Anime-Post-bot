@@ -1,0 +1,22 @@
+{
+  "monday": [],
+  "tuesday": [],
+  "wednesday": [],
+  "thursday": [],
+  "friday": [
+    {
+      "name": "Yaiba : Samurai Legend",
+      "time": "~~~",
+      "episode": "S01 E08",
+      "platform": "📱 Amazon Prime Video [Anime Times]"
+    },
+    {
+      "name": "Fairy Tail",
+      "time": "8:30 PM",
+      "episode": "S03 E01",
+      "platform": "🎬 YouTube [Muse India]"
+    }
+  ],
+  "saturday": [],
+  "sunday": []
+}
