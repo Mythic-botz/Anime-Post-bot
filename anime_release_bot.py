@@ -156,7 +156,7 @@ def run_http_server():
         def do_GET(self):
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(b"🤖 Anime Bot is Running (Render Compatible)")
+            self.wfile.write("🤖 Anime Bot is Running (Render Compatible)".encode("utf-8"))
     server = HTTPServer(("0.0.0.0", port), Handler)
     print(f"🌐 HTTP server started at http://0.0.0.0:{port}")
     server.serve_forever()
